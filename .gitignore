@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+
+# 虚拟环境与编辑器配置（本地相关，不入库）
+.venv/
+.vscode/
+
+# 数据库连接串（参考 .env.example）
+.env

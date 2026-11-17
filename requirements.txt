@@ -2,3 +2,9 @@ akshare
 pandas
 numpy
 matplotlib
+seaborn
+statsmodels
+scipy
+sqlalchemy
+pymysql
+python-dotenv
