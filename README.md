@@ -31,6 +31,7 @@ hs300-quant-analysis/
 ├── .env.example              # 数据库连接串示例（复制为 .env 后使用）
 ├── data/                     # 中间数据与结果（脚本自动生成）
 ├── figures/                  # 图表（脚本自动生成）
+│   └── hs300_dashboard.pbix  # Power BI 交互式仪表盘（手工搭建）
 └── README.md
 ```
 
@@ -171,6 +172,18 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 
 ---
 
+## Power BI 仪表盘
+
+`figures/hs300_dashboard.pbix` 是在脚本输出基础上手工搭建的交互式报表（单页，1920×1080）：
+
+- **数据源**：`data/hs300_backtest.csv`（表名 `hs300_backtest`），即 Step 4 的逐日净值、信号与仓位明细；
+- **组件**：日期切片器（默认 2021-01-29 → 2026-11-13）、策略收益与仓位指标卡、净值走势折线图；
+- **打开方式**：用 [Power BI Desktop](https://powerbi.microsoft.com/desktop/) 打开该文件即可交互筛选；重新运行 `04_backtest.py` 后点击"刷新"即可同步最新回测结果。
+
+> 注：`.pbix` 为二进制文件，Git 无法做行级 diff，每次保存都会整体产生新版本。
+
+---
+
 ## 输出文件
 
 ### `data/`
@@ -197,6 +210,7 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 | `hs300_ic_rolling.png` | 120 日滚动 IC 小图 |
 | `hs300_decile.png` | 前 3 特征十分位分组收益 |
 | `hs300_backtest.png` | 净值 / 回撤 / 仓位三联图 |
+| `hs300_dashboard.pbix` | Power BI 仪表盘（需 Power BI Desktop 打开） |
 
 ---
 
