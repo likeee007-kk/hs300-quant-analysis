@@ -1,20 +1,22 @@
 # 沪深300多源金融数据分析与均线趋势策略回测
 
-一个端到端的量化研究小项目：**真实数据获取 → 多源时间对齐 → 清洗与特征工程 → 特征预测力检验 → 含成本回测与样本外验证**。
+一个端到端的量化研究小项目：**真实数据获取 → 多源时间对齐 → 清洗与特征工程 → 特征预测力检验 → 含成本回测与样本外验证 → MySQL 落库与数据质量校验**。
 
-数据来自 [AKShare](https://akshare.akfamily.xyz/)（沪深300指数日线 + 中国制造业 PMI），覆盖 **2021-01-04 至今**。项目重点不只是"跑出一个策略"，更在于用 IC 检验、样本外切分与参数敏感性分析，诚实地回答：**这个信号到底有没有预测力？**
+数据来自 [AKShare](https://akshare.akfamily.xyz/)（沪深300指数日线 + 中国制造业 PMI），覆盖 **2021-01-04 至 2026-11-13**。项目重点不只是“跑出一个策略”，更在于用 IC 检验、样本外切分与参数敏感性分析，诚实地回答：**这个信号到底有没有预测力？**
 
 ---
 
 ## 核心结论（TL;DR）
 
 - 5 个候选特征（`ma_ratio` / `macd` / `vol20` / `vratio` / `pmi`）对次日收益的 IC 绝对值都不超过 **0.05**，**没有一个达到 5% 显著性**；扩展到 5/20/60 日周期（非重叠抽样）同样不显著。
-- 因此，均线趋势策略的定位应是 **"下跌时空仓、控制回撤"**，而不是可交易的 alpha。
+- 因此，均线趋势策略的定位应是 **“下跌时空仓、控制回撤”**，而不是可交易的 alpha。
 - 全样本（2021-01-29 → 2026-11-13，含单边 5bp 成本）：z-band 策略累计 **+2.0%**，同期买入持有 **-25.3%**；最大回撤 **-25.5% vs -45.6%**。
 - 样本外（2025-02-21 起）：策略累计 **+12.4%**、夏普 **0.76**、最大回撤 **-6.9%**，基准分别为 +2.2%、0.16、-21.2%。
 - 参数网格没有稳定占优的组合，结果对参数敏感——**不应把回测收益当作实盘预期**。
 
 ![策略净值、回撤与仓位](figures/hs300_backtest.png)
+
+> 图内净值为**毛收益**（未扣成本）；下方统计表与 README 结论为扣除单边 5bp 后的**净收益**。静态看板预览见 [`figures/hs300_dashboard.png`](figures/hs300_dashboard.png)。
 
 ---
 
@@ -26,12 +28,27 @@ hs300-quant-analysis/
 ├── 02_align_pmi.py           # Step2 日频行情 × 月频 PMI 时间对齐
 ├── 03_clean_and_features.py  # Step3 清洗、特征工程、IC / 相关性 / 分组检验
 ├── 04_backtest.py            # Step4 策略回测、样本内外、成本与参数敏感性
-├── import_data.py            # 可选：把特征表写入 MySQL
-├── requirements.txt
+├── import_data.py            # Step5（可选）MySQL 建表 + 质量校验 + 增量 upsert
+├── run_all.py                # 一键顺序运行 01–04
+├── schema.sql                # MySQL 表结构（主键、字段类型、注释）
+├── requirements.txt          # 本机验证版本
+├── requirements-dev.txt      # 开发/测试依赖（测试用标准库 unittest）
 ├── .env.example              # 数据库连接串示例（复制为 .env 后使用）
-├── data/                     # 中间数据与结果（脚本自动生成）
-├── figures/                  # 图表（脚本自动生成）
-│   └── hs300_dashboard.pbix  # Power BI 交互式仪表盘（手工搭建）
+├── data/                     # 中间数据与结果（脚本生成，仓库保留样例）
+├── figures/                  # 图表（脚本生成）
+│   ├── hs300_dashboard.png   # 看板静态预览
+│   └── hs300_dashboard.pbix  # Power BI 交互式仪表盘
+├── scripts/
+│   └── make_dashboard_preview.py
+├── tests/
+│   ├── test_alignment.py
+│   ├── test_backtest_outputs.py
+│   ├── test_data_quality.py
+│   └── test_loader.py
+├── docs/
+│   └── design.md             # 关键设计取舍与开发时间线
+├── CHANGELOG.md
+├── LICENSE
 └── README.md
 ```
 
@@ -41,7 +58,7 @@ hs300-quant-analysis/
 
 ### 1. 环境
 
-需要 Python 3.10+（本项目在 3.14 下运行通过）。
+需要 Python 3.10+（本项目在 Python 3.14.7 下验证通过）。
 
 ```bash
 python -m venv .venv
@@ -56,9 +73,11 @@ pip install -r requirements.txt
 
 ### 2. 运行主流程
 
-脚本使用**相对路径**（`data/`、`figures/`），请在项目根目录执行，顺序不能颠倒：
+脚本使用**相对路径**（`data/`、`figures/`），请在项目根目录执行：
 
 ```bash
+python run_all.py                # 一键按顺序运行 01–04
+# 或逐步运行：
 python 01_fetch_data.py          # -> data/hs300_daily.csv, figures/hs300_nav.png
 python 02_align_pmi.py           # -> data/hs300_with_pmi.csv
 python 03_clean_and_features.py  # -> data/hs300_features.csv, IC 表, 4 张图
@@ -69,10 +88,96 @@ python 04_backtest.py            # -> 回测明细/统计/参数网格, figures/
 
 ```bash
 cp .env.example .env    # 然后填写 DATABASE_URL
-python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
+python import_data.py --dry-run   # 只做质量校验，不连接数据库
+python import_data.py             # 建表 + 主键去重 + 增量 upsert
 ```
 
-`.env` 已被 `.gitignore` 忽略，不会提交到仓库。
+- 表结构见 [`schema.sql`](schema.sql)；
+- 主键 `trade_date`，重复日期通过 `INSERT ... ON DUPLICATE KEY UPDATE` 覆盖；
+- `.env` 已被 `.gitignore` 忽略，不会提交到仓库。
+
+### 4. 运行测试
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+测试使用标准库 `unittest`，不需要额外安装 pytest。
+
+### 5. 生成看板静态预览
+
+```bash
+python scripts/make_dashboard_preview.py   # -> figures/hs300_dashboard.png
+```
+
+---
+
+## 数据表结构（MySQL）
+
+完整 DDL 见 [`schema.sql`](schema.sql)。核心设计：
+
+```sql
+CREATE TABLE IF NOT EXISTS hs300 (
+    trade_date   DATE          NOT NULL COMMENT '交易日',
+    open_price   DECIMAL(12,4) NULL     COMMENT '开盘价',
+    high_price   DECIMAL(12,4) NULL     COMMENT '最高价',
+    low_price    DECIMAL(12,4) NULL     COMMENT '最低价',
+    close_price  DECIMAL(12,4) NOT NULL COMMENT '收盘价',
+    volume       BIGINT        NULL     COMMENT '成交量',
+    daily_return DECIMAL(12,8) NULL     COMMENT '日收益率',
+    nav          DECIMAL(12,6) NULL     COMMENT '净值（起点 1.0）',
+    pmi          DECIMAL(8,4)  NULL     COMMENT '制造业 PMI（月末发布，backward 对齐）',
+    ma5          DECIMAL(12,4) NULL     COMMENT '5 日均线',
+    ma20         DECIMAL(12,4) NULL     COMMENT '20 日均线',
+    vol20        DECIMAL(12,8) NULL     COMMENT '20 日收益波动率',
+    dif          DECIMAL(12,6) NULL     COMMENT 'MACD DIF',
+    dea          DECIMAL(12,6) NULL     COMMENT 'MACD DEA',
+    macd         DECIMAL(12,6) NULL     COMMENT 'MACD 柱 = 2 * (DIF - DEA)',
+    ma_ratio     DECIMAL(12,8) NULL     COMMENT 'MA5 / MA20 - 1',
+    vratio       DECIMAL(12,8) NULL     COMMENT 'volume / MA20(volume) - 1',
+    updated_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                  ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+    PRIMARY KEY (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='沪深300日频行情、特征与PMI对齐表';
+```
+
+### 数据字典（`data/hs300_features.csv`）
+
+| 字段 | 类型 | 含义 | 来源 |
+| --- | --- | --- | --- |
+| `date` | DATE | 交易日 | AKShare |
+| `open` / `high` / `low` / `close` | DECIMAL | 开高低收 | AKShare |
+| `volume` | BIGINT | 成交量 | AKShare |
+| `ret` | DECIMAL | 日收益率 `close.pct_change()` | 计算 |
+| `nav` | DECIMAL | 净值，起点 1.0 | 计算 |
+| `pmi` | DECIMAL | 制造业 PMI，按月末发布时点 backward 对齐 | AKShare |
+| `ma5` / `ma20` | DECIMAL | 5 / 20 日均线 | 计算 |
+| `vol20` | DECIMAL | 20 日收益标准差 | 计算 |
+| `dif` / `dea` / `macd` | DECIMAL | MACD 指标，`macd = 2 × (dif - dea)` | 计算 |
+| `ma_ratio` | DECIMAL | `ma5 / ma20 - 1`，趋势强度 | 计算 |
+| `vratio` | DECIMAL | `volume / MA20(volume) - 1`，量能放大倍数 | 计算 |
+
+> `fwd_ret`（未来收益）**只用于分析，不写入特征文件**，避免被误当作特征造成前视。
+> 滚动特征前 19 个交易日为 NULL，入库时对应 MySQL `NULL`。
+
+---
+
+## 数据质量校验
+
+`import_data.py` 在入库前执行以下检查，任一硬错误都会中止写入：
+
+- 必需字段是否齐全（17 列）；
+- `date` / `close` / `ret` / `pmi` 是否为空；
+- `date` 是否重复（重复时按主键保留最后一条，并输出 warning）；
+- 滚动特征是否在窗口之后仍为空；
+- 日期范围与月度覆盖（当前：1,420 行、2021-01-04 至 2026-11-13、71 个自然月）；
+- 输出统一报告，支持 `--dry-run` 无数据库运行。
+
+```text
+[validate] rows=1420, date_min=2021-01-04, date_max=2026-11-13, months=71, duplicate_dates=0
+[validate] 滚动窗口内允许的空值：{'ma5': 4, 'ma20': 19, 'vol20': 19, 'ma_ratio': 19, 'vratio': 19}
+[dry-run] 校验通过；未连接数据库。
+```
 
 ---
 
@@ -88,9 +193,10 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 
 ### Step 2 — 多源时间对齐（`02_align_pmi.py`）
 
-- 从 `ak.macro_china_pmi()` 取制造业 PMI，把"2024年03月份"解析为**当月月末**；
+- 从 `ak.macro_china_pmi()` 取制造业 PMI，把“2024年03月份”解析为**当月月末**；
 - 用 `pd.merge_asof(direction="backward")` 将月频 PMI 对齐到每个交易日：任一交易日只能看到**已发布**的最新 PMI，避免未来函数；
-- 中国官方制造业 PMI 在当月最后一天发布，因此按月末对齐与信息可得时点基本一致。
+- 中国官方制造业 PMI 在当月最后一天发布，因此按月末对齐与信息可得时点基本一致；
+- `tests/test_alignment.py` 校验“PMI 在一个自然月内最多切换一次，且只在该月最后一个交易日切换”。
 
 ### Step 3 — 清洗、特征工程与预测力检验（`03_clean_and_features.py`）
 
@@ -116,10 +222,13 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 - `dif` 与 `ma_ratio` 相关性约 0.82 且 IC 更弱，剔除；
 - 最终分析集：**`ma_ratio` / `macd` / `vol20` / `vratio` / `pmi`**，并用 VIF 复核（均低于 5）。
 
+> 注意：VIF 在这里是**复核**，不是“逐个剔除直到 VIF<5”。机械按 VIF 删除可能删掉策略核心变量。
+
 **预测力检验（而非同期相关）**
 
 - **滞后 IC**：`feature(t)` vs `ret(t+1)`，同时给出 Pearson、Spearman、t 值；
 - **滚动 IC / ICIR**（120 日窗口）：看预测力是否稳定，而非只在某段行情成立；
+- **多周期复核**：对 1/5/20/60 日 horizon 用**非重叠抽样**重算 IC，避免重叠窗口高估 t 值；
 - **十分位分组**：先做 252 日滚动 z-score，再按分位统计平均未来收益，检验单调性与非线性。
 
 ![滞后 IC](figures/hs300_ic.png)
@@ -131,6 +240,14 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 - **交易成本**：单边 5bp（佣金 + 冲击成本），调仓日按 `|Δ仓位| × 5bp` 计提，并另给零成本对照；
 - **样本切分**：前 70% 为样本内（IS，2021-01-29 → 2025-02-20），后 30% 为样本外（OOS，2025-02-21 → 2026-11-13）；参数由经济含义预先固定，网格只用于展示 IS 敏感性，不拿 OOS 背书；
 - **多周期复核**：对 1/5/20/60 日 horizon 用**非重叠抽样**重算 IC，避免重叠窗口高估 t 值。
+
+### Step 5 — MySQL 落库（可选，`import_data.py`）
+
+- 读取 `data/hs300_features.csv`，校验 17 个字段；
+- 按 `trade_date` 去重、排序，NaN 转 NULL；
+- 执行 [`schema.sql`](schema.sql) 建表；
+- 按主键 `trade_date` 执行 `INSERT ... ON DUPLICATE KEY UPDATE`，支持重复运行；
+- 输出质量报告；`--dry-run` 可在没有 MySQL 的环境下跑通校验。
 
 ---
 
@@ -174,13 +291,14 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 
 ## Power BI 仪表盘
 
-`figures/hs300_dashboard.pbix` 是在脚本输出基础上手工搭建的交互式报表（单页，1920×1080）：
+![看板静态预览](figures/hs300_dashboard.png)
 
-- **数据源**：`data/hs300_backtest.csv`（表名 `hs300_backtest`），即 Step 4 的逐日净值、信号与仓位明细；
+- `figures/hs300_dashboard.png`：由 `scripts/make_dashboard_preview.py` 从回测结果生成的**静态预览**（净值按扣 5bp 后的净收益重算），方便在 GitHub 直接查看；
+- `figures/hs300_dashboard.pbix`：手工搭建的交互式报表（单页，1920×1080），数据源为 `data/hs300_backtest.csv`（表名 `hs300_backtest`）；
 - **组件**：日期切片器（默认 2021-01-29 → 2026-11-13）、策略收益与仓位指标卡、净值走势折线图；
-- **打开方式**：用 [Power BI Desktop](https://powerbi.microsoft.com/desktop/) 打开该文件即可交互筛选；重新运行 `04_backtest.py` 后点击"刷新"即可同步最新回测结果。
+- **打开方式**：用 [Power BI Desktop](https://powerbi.microsoft.com/desktop/) 打开 `.pbix` 即可交互筛选；重新运行 `04_backtest.py` 后点击“刷新”即可同步最新回测结果。
 
-> 注：`.pbix` 为二进制文件，Git 无法做行级 diff，每次保存都会整体产生新版本。
+> 注：`.pbix` 为二进制文件，Git 无法做行级 diff，每次保存都会整体产生新版本；静态预览不是 Power BI 截图，若你需要正式截图，可在 Power BI Desktop 中“导出 → 图像”替换 `hs300_dashboard.png`。
 
 ---
 
@@ -195,10 +313,10 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 | `hs300_features.csv` | Step3 特征表（不含 `fwd_ret`，避免误用导致前视） |
 | `hs300_ic.csv` | 单特征滞后 IC、Spearman、t 值、ICIR |
 | `hs300_ic_horizon.csv` | 1/5/20/60 日多周期 IC（非重叠） |
-| `hs300_backtest_stats.csv` | 全样本 / IS / OOS × 各策略指标 |
+| `hs300_backtest_stats.csv` | 全样本 / IS / OOS × 各策略指标（净收益） |
 | `hs300_backtest_yearly.csv` | 分年度收益 |
 | `hs300_param_grid.csv` | 滞回带参数敏感性（仅 IS） |
-| `hs300_backtest.csv` | 逐日净值、仓位、信号明细 |
+| `hs300_backtest.csv` | 逐日净值、仓位、信号明细（`ret_band` / `nav_band` 为毛收益） |
 
 ### `figures/`
 
@@ -209,7 +327,8 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 | `hs300_ic.png` | 滞后 IC 柱状图（Pearson vs Spearman） |
 | `hs300_ic_rolling.png` | 120 日滚动 IC 小图 |
 | `hs300_decile.png` | 前 3 特征十分位分组收益 |
-| `hs300_backtest.png` | 净值 / 回撤 / 仓位三联图 |
+| `hs300_backtest.png` | 净值 / 回撤 / 仓位三联图（毛收益） |
+| `hs300_dashboard.png` | 看板静态预览（净收益） |
 | `hs300_dashboard.pbix` | Power BI 仪表盘（需 Power BI Desktop 打开） |
 
 ---
@@ -220,7 +339,24 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 - **平稳化**：价格水平类指标（均线偏离、MACD）在跨期比较前先做滚动 z-score；
 - **稳健性**：Pearson 与 Spearman 对照，降低极端值影响；长周期 IC 用非重叠抽样校正 t 值；
 - **成本意识**：同时输出毛收益、净收益、年化换手与成本拖累，避免把零成本回测当策略收益；
+- **数据质量**：入库前校验字段、主键、空值、日期范围与月度覆盖；支持 `--dry-run`；
+- **可复现**：`run_all.py` 一键跑完 01–04；`requirements.txt` 锁定本机验证版本；
 - **Windows 中文输出**：脚本将 stdout/stderr 切换为 UTF-8，避免 GBK 控制台乱码。
+
+---
+
+## 测试
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+当前 23 个测试，覆盖：
+
+- **数据质量**：1,420 行、日期范围、主键唯一、空值模式、PMI 覆盖；
+- **时间对齐**：PMI 无缺失、与特征表一致、月度切换时点；
+- **回测一致性**：仓位是信号滞后一日、仓位 0/1、净净值与统计表一致、样本外回撤；
+- **加载器**：字段映射、重复日期去重、关键字段空值拦截、`--dry-run` 不依赖数据库。
 
 ---
 
@@ -238,12 +374,20 @@ python import_data.py   # 将 data/hs300_features.csv 写入 hs300 表
 
 ## 依赖
 
-| 包 | 用途 |
-| --- | --- |
-| `akshare` | 行情与宏观数据获取 |
-| `pandas` / `numpy` | 数据处理与计算 |
-| `matplotlib` / `seaborn` | 绘图 |
-| `statsmodels` | VIF 共线性诊断、统计工具 |
-| `scipy` | 科学计算依赖 |
-| `sqlalchemy` / `pymysql` | 可选：写入 MySQL |
-| `python-dotenv` | 读取 `.env` 数据库配置 |
+| 包 | 版本 | 用途 |
+| --- | --- | --- |
+| `akshare` | 1.20.37 | 行情与宏观数据获取 |
+| `pandas` / `numpy` | 3.0.6 / 2.5.3 | 数据处理与计算 |
+| `matplotlib` / `seaborn` | 3.11.2 / 0.13.2 | 绘图 |
+| `statsmodels` | >=0.14.4 | VIF 共线性诊断、统计工具 |
+| `scipy` | 1.18.1 | 科学计算依赖 |
+| `SQLAlchemy` / `PyMySQL` | 2.1.8 / 1.2.4 | MySQL 落库 |
+| `python-dotenv` | 1.2.4 | 读取 `.env` 数据库配置 |
+
+---
+
+## 开发记录
+
+- 设计取舍与时间线：[`docs/design.md`](docs/design.md)
+- 变更日志：[`CHANGELOG.md`](CHANGELOG.md)
+- 许可证：[MIT](LICENSE)
