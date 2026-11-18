@@ -20,9 +20,10 @@ class DataQualityTest(unittest.TestCase):
         )
 
     def test_rows_and_date_range(self) -> None:
-        self.assertEqual(len(self.df), 1420)
+        # 回归测试针对当前快照；01_fetch_data 追加新数据后仍应通过
+        self.assertGreaterEqual(len(self.df), 1420)
         self.assertEqual(self.df["date"].min(), pd.Timestamp("2021-01-04"))
-        self.assertEqual(self.df["date"].max(), pd.Timestamp("2026-11-13"))
+        self.assertGreaterEqual(self.df["date"].max(), pd.Timestamp("2026-11-13"))
 
     def test_no_duplicate_dates(self) -> None:
         self.assertEqual(int(self.df["date"].duplicated().sum()), 0)
@@ -47,7 +48,7 @@ class DataQualityTest(unittest.TestCase):
             self.assertFalse(bool(nulls.iloc[20:].any()), col)
 
     def test_pmi_coverage(self) -> None:
-        self.assertEqual(int(self.df["date"].dt.to_period("M").nunique()), 71)
+        self.assertGreaterEqual(int(self.df["date"].dt.to_period("M").nunique()), 71)
         self.assertEqual(int(self.df["pmi"].isna().sum()), 0)
         self.assertTrue(bool(self.df["pmi"].between(30, 60).all()))
 

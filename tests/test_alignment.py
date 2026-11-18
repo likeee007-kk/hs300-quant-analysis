@@ -20,7 +20,7 @@ class AlignmentTest(unittest.TestCase):
         cls.features = read("hs300_features.csv")
 
     def test_row_count_and_dates(self) -> None:
-        self.assertEqual(len(self.aligned), 1420)
+        self.assertGreaterEqual(len(self.aligned), 1420)
         self.assertEqual(int(self.aligned["date"].duplicated().sum()), 0)
         self.assertTrue(bool(self.aligned["date"].is_monotonic_increasing))
 
