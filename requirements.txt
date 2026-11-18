@@ -1,10 +1,12 @@
-akshare
-pandas
-numpy
-matplotlib
-seaborn
-statsmodels
-scipy
-sqlalchemy
-pymysql
-python-dotenv
+# 本机验证环境：Python 3.14.7
+# 如你的环境不同，优先保证 pandas/numpy/akshare 版本一致，其余可按 pip 解析结果调整。
+akshare==1.20.37
+pandas==3.0.6
+numpy==2.5.3
+matplotlib==3.11.2
+seaborn==0.13.2
+statsmodels>=0.14.4
+scipy==1.18.1
+SQLAlchemy==2.1.8
+PyMySQL==1.2.4
+python-dotenv==1.2.4
