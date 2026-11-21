@@ -1,13 +1,21 @@
 """05_mini_recon_gen.py — 迷你对账造数脚本（增强版）.
 
 功能:
-  1. 手写 DDL 创建 trade / position / market_data 三表
+  1. 手写 DDL 创建 trade / position / market_data / position_adjust 四表
   2. 3 个月模拟数据: 2026-08-01 ~ 2026-10-31
   3. 5 只标的 × 3 个账户
   4. 价格模拟: 带漂移的几何布朗运动
   5. 交易模拟: 随机生成 BUY/SELL
   6. 持仓成本: 加权平均法跟踪 cost_price
-  7. 预埋 3 颗"对账雷"供 anomaly_detection 发现
+  7. 公司行为: 送股/拆股/配股/现金分红，写入 position_adjust
+  8. 预埋 3 颗"对账雷"供 anomaly_detection 发现
+
+公司行为清单:
+  - 2026-08-17, 600519, 10送2
+  - 2026-09-01, 000858, 每股派 1.5 元
+  - 2026-09-22, 601318, 10配3 @ 30 元
+  - 2026-10-12, 000333, 1拆2
+  - 2026-10-22, 600036, 10送1
 
 埋雷清单:
   - 雷 1: 2026-09-15, acc_001, 600519, 漏记 100 股 (系统少记)
@@ -60,10 +68,43 @@ LANDMINES = [
 ]
 landmine_map = {(lm[0], lm[1], lm[2]): lm[3] for lm in LANDMINES}
 
+# ── 3b. 公司行为 ─────────────────────────────────────────────────
+# (除权除息日, 标的, 类型, 比例, 每股现金分红, 配股价, 备注)
+#   STOCK_DIVIDEND: 送股/转增, ratio 为每股新增股数 (10送2 → 0.2)
+#   SPLIT:          拆股, ratio 为每股新增股数 (1拆2 → 1.0)
+#   RIGHTS:         配股, ratio 为每股配售股数, sub_price 为配股价
+#   CASH_DIVIDEND:  现金分红, cash_per_share 为每股派息
+CORPORATE_ACTIONS = [
+    ("2026-08-17", "600519", "STOCK_DIVIDEND", 0.20, 0.0, 0.0, "10送2"),
+    ("2026-09-01", "000858", "CASH_DIVIDEND", 0.0, 1.50, 0.0, "每股派1.5元"),
+    ("2026-09-22", "601318", "RIGHTS", 0.30, 0.0, 30.0, "10配3@30元"),
+    ("2026-10-12", "000333", "SPLIT", 1.00, 0.0, 0.0, "1拆2"),
+    ("2026-10-22", "600036", "STOCK_DIVIDEND", 0.10, 0.0, 0.0, "10送1"),
+]
+actions_by_date = {}
+for ex_date, sym, typ, ratio, cash, sub, remark in CORPORATE_ACTIONS:
+    actions_by_date.setdefault(ex_date, []).append((sym, typ, ratio, cash, sub, remark))
+
+
+def ex_action_factor(typ: str, prev_close: float, ratio: float,
+                     cash_per_share: float, sub_price: float) -> float:
+    """除权除息参考价的折算因子（不消耗随机数）."""
+    if typ in ("STOCK_DIVIDEND", "SPLIT"):
+        return 1.0 / (1.0 + ratio)
+    if typ == "RIGHTS":
+        return (prev_close + ratio * sub_price) / (prev_close * (1.0 + ratio))
+    if typ == "CASH_DIVIDEND":
+        return max((prev_close - cash_per_share) / prev_close, 0.01)
+    return 1.0
+
 
 # ── 4. 价格生成 (几何布朗运动) ────────────────────────────────────
 def generate_prices() -> dict:
-    """生成每只标的每个交易日的收盘价，返回 {(date_str, symbol): (close, pre_close)}."""
+    """生成每只标的每个交易日的收盘价，返回 {(date_str, symbol): (close, pre_close)}.
+
+    pre_close 是除权除息后的参考价；公司行为不消耗随机数，
+    所以 42 号种子下价格路径只会在除权日发生台阶式调整。
+    """
     prices = {}
     prev_closes = {s: b for s, b in SYMBOLS.items()}
 
@@ -77,9 +118,14 @@ def generate_prices() -> dict:
             drift = ANNUAL_DRIFT[sym] / TRADING_DAYS_PER_YEAR
             vol = ANNUAL_VOL[sym] / np.sqrt(TRADING_DAYS_PER_YEAR)
             prev = prev_closes[sym]
-            close = round(prev * np.exp(drift + vol * np.random.normal(0, 1)), 2)
-            close = max(close, base * 0.2)  # 防止跌成负数
-            prices[(date_str, sym)] = (close, prev)
+            factor = 1.0
+            for action_sym, typ, ratio, cash, sub, _ in actions_by_date.get(date_str, []):
+                if action_sym == sym:
+                    factor *= ex_action_factor(typ, prev, ratio, cash, sub)
+            adjusted_base = prev * factor
+            close = round(adjusted_base * np.exp(drift + vol * np.random.normal(0, 1)), 2)
+            close = max(close, base * 0.2)  # 防止长期阴跌后价格趋近于 0
+            prices[(date_str, sym)] = (close, round(adjusted_base, 2))
             prev_closes[sym] = close
         date += timedelta(days=1)
     return prices
@@ -90,6 +136,7 @@ def generate_all(prices: dict):
     trades_rows = []
     market_rows = []
     position_rows = []
+    adjust_rows = []
 
     # 理论持仓 & 成本 (均不含埋雷偏差)
     theo_qty = {(a, s): 0 for a in ACCOUNTS for s in SYMBOLS}
@@ -111,6 +158,52 @@ def generate_all(prices: dict):
                 "trade_date": date_str, "symbol": sym,
                 "close_price": close, "pre_close": pre_close,
             })
+
+        # 5a-2. 公司行为（盘前）：只改持仓和成本，不产生成交
+        #       现金分红按除权日前持仓计提；买入发生在除权日的不享受本期分红
+        for sym, typ, ratio, cash, sub, remark in actions_by_date.get(date_str, []):
+            for a in ACCOUNTS:
+                q = theo_qty[(a, sym)]
+                if q <= 0:
+                    continue
+
+                if typ in ("STOCK_DIVIDEND", "SPLIT"):
+                    delta = int(round(q * ratio))
+                    if delta <= 0:
+                        continue
+                    new_qty = q + delta
+                    # 总成本不变，每股成本按股数摊薄
+                    cost_price[(a, sym)] = round(
+                        cost_price[(a, sym)] * q / new_qty, 4
+                    )
+                    theo_qty[(a, sym)] = new_qty
+                    cash_flow = 0.0
+                    cash_income = 0.0
+                elif typ == "RIGHTS":
+                    delta = int(round(q * ratio))
+                    if delta <= 0:
+                        continue
+                    new_qty = q + delta
+                    # 配股缴款计入成本；cash_flow 作为外部资金流，不计入盈亏
+                    cost_price[(a, sym)] = round(
+                        (q * cost_price[(a, sym)] + delta * sub) / new_qty, 4
+                    )
+                    theo_qty[(a, sym)] = new_qty
+                    cash_flow = round(delta * sub, 2)
+                    cash_income = 0.0
+                elif typ == "CASH_DIVIDEND":
+                    delta = 0
+                    cash_flow = 0.0
+                    cash_income = round(q * cash, 2)
+                else:
+                    continue
+
+                adjust_rows.append({
+                    "account_id": a, "symbol": sym, "ex_date": date_str,
+                    "adjust_type": typ, "qty_delta": delta,
+                    "cash_flow": cash_flow, "cash_income": cash_income,
+                    "remark": remark,
+                })
 
         # 5b. 交易
         day_trades = {(a, s): {"buy": 0, "sell": 0, "buy_amt": 0.0, "sell_amt": 0.0}
@@ -182,7 +275,7 @@ def generate_all(prices: dict):
 
         date += timedelta(days=1)
 
-    return trades_rows, market_rows, position_rows
+    return trades_rows, market_rows, position_rows, adjust_rows
 
 
 # ── 6. DDL ────────────────────────────────────────────────────────
@@ -200,7 +293,9 @@ DDL_STATEMENTS = [
         `trade_date`  DATE            NOT NULL COMMENT '交易日',
         PRIMARY KEY (`trade_id`),
         INDEX `idx_trade_acc_date` (`account_id`, `trade_date`),
-        INDEX `idx_trade_symbol_date` (`symbol`, `trade_date`)
+        INDEX `idx_trade_symbol_date` (`symbol`, `trade_date`),
+        INDEX `idx_trade_acc_sym_date` (`account_id`, `symbol`, `trade_date`),
+        INDEX `idx_trade_date` (`trade_date`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       COMMENT='交易流水表'
     """,
@@ -211,7 +306,8 @@ DDL_STATEMENTS = [
         `close_price` DECIMAL(12,4)   NOT NULL COMMENT '收盘价',
         `pre_close`   DECIMAL(12,4)   NULL     COMMENT '前收盘价',
         PRIMARY KEY (`trade_date`, `symbol`),
-        INDEX `idx_md_symbol` (`symbol`)
+        INDEX `idx_md_symbol` (`symbol`),
+        INDEX `idx_md_symbol_date` (`symbol`, `trade_date`, `close_price`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       COMMENT='日频行情表'
     """,
@@ -227,6 +323,23 @@ DDL_STATEMENTS = [
         INDEX `idx_pos_date` (`trade_date`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       COMMENT='日频持仓表'
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS `position_adjust` (
+        `adjust_id`   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        `account_id`  VARCHAR(16)   NOT NULL COMMENT '账户ID',
+        `symbol`      VARCHAR(16)   NOT NULL COMMENT '标的代码',
+        `ex_date`     DATE          NOT NULL COMMENT '除权除息日',
+        `adjust_type` VARCHAR(20)   NOT NULL COMMENT 'STOCK_DIVIDEND/SPLIT/RIGHTS/CASH_DIVIDEND',
+        `qty_delta`   INT           NOT NULL DEFAULT 0 COMMENT '非交易持仓变动(股)',
+        `cash_flow`   DECIMAL(20,2) NOT NULL DEFAULT 0 COMMENT '外部资金流: 配股缴款为正',
+        `cash_income` DECIMAL(20,2) NOT NULL DEFAULT 0 COMMENT '投资收益: 现金分红',
+        `remark`      VARCHAR(128)  NULL,
+        PRIMARY KEY (`adjust_id`),
+        UNIQUE KEY `uk_adj` (`account_id`,`symbol`,`ex_date`,`adjust_type`),
+        KEY `idx_adj_date` (`ex_date`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      COMMENT='非交易持仓变动: 送转/拆股/配股/分红'
     """,
 ]
 
@@ -245,6 +358,12 @@ INSERT_SQL = {
         "INSERT INTO `position` (account_id, symbol, trade_date, pre_qty, qty, cost_price) "
         "VALUES (:account_id, :symbol, :trade_date, :pre_qty, :qty, :cost_price)"
     ),
+    "position_adjust": (
+        "INSERT INTO `position_adjust` (account_id, symbol, ex_date, adjust_type, "
+        "qty_delta, cash_flow, cash_income, remark) "
+        "VALUES (:account_id, :symbol, :ex_date, :adjust_type, "
+        ":qty_delta, :cash_flow, :cash_income, :remark)"
+    ),
 }
 
 
@@ -256,34 +375,44 @@ def main():
     print(f"  共 {n_dates} 个交易日 × {len(SYMBOLS)} 只标的")
 
     print("生成交易 & 持仓 ...")
-    trades_rows, market_rows, position_rows = generate_all(prices)
-    print(f"  trade: {len(trades_rows)} | market: {len(market_rows)} | position: {len(position_rows)}")
+    trades_rows, market_rows, position_rows, adjust_rows = generate_all(prices)
+    print(
+        f"  trade: {len(trades_rows)} | market: {len(market_rows)} | "
+        f"position: {len(position_rows)} | adjust: {len(adjust_rows)}"
+    )
 
     # DataFrame 类型清洗
     df_trade = pd.DataFrame(trades_rows)
     df_market = pd.DataFrame(market_rows)
     df_pos = pd.DataFrame(position_rows)
+    df_adj = pd.DataFrame(adjust_rows)
 
-    for df in [df_trade, df_market, df_pos]:
+    for df in [df_trade, df_market, df_pos, df_adj]:
         for col in df.select_dtypes(include=["datetime64[ns]"]).columns:
             df[col] = df[col].astype(str)
-    for df in [df_trade, df_market, df_pos]:
+    for df in [df_trade, df_market, df_pos, df_adj]:
         df.replace({np.nan: None}, inplace=True)
 
     print("入库 MySQL ...")
     with ENGINE.begin() as conn:
         for ddl in DDL_STATEMENTS:
             conn.execute(text(ddl))
-        for tbl in ["trade", "position", "market_data"]:
+        for tbl in ["trade", "position", "market_data", "position_adjust"]:
             conn.execute(text(f"DELETE FROM `{tbl}`"))
         conn.execute(text(INSERT_SQL["trade"]), df_trade.to_dict("records"))
         conn.execute(text(INSERT_SQL["market_data"]), df_market.to_dict("records"))
         conn.execute(text(INSERT_SQL["position"]), df_pos.to_dict("records"))
+        if len(df_adj) > 0:
+            conn.execute(text(INSERT_SQL["position_adjust"]), df_adj.to_dict("records"))
 
     print(f"\n[OK] 造数完成:")
-    print(f"   trade:       {len(df_trade):>5} 行")
-    print(f"   market_data: {len(df_market):>5} 行")
-    print(f"   position:    {len(df_pos):>5} 行")
+    print(f"   trade:           {len(df_trade):>5} 行")
+    print(f"   market_data:     {len(df_market):>5} 行")
+    print(f"   position:        {len(df_pos):>5} 行")
+    print(f"   position_adjust: {len(df_adj):>5} 行")
+    print(f"\n[公司行为] 已生成 {len(adjust_rows)} 条持仓调整:")
+    for ex_date, sym, typ, ratio, cash, sub, remark in CORPORATE_ACTIONS:
+        print(f"   {ex_date} | {sym} | {typ:<15} | {remark}")
     print(f"\n[埋雷] 已埋 {len(LANDMINES)} 颗对账雷:")
     for lm in LANDMINES:
         direction = "漏记" if lm[3] < 0 else "多记"

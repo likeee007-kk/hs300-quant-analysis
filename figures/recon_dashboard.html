@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Recon · 交易对账看板</title>
+<script src="https://cdn.plot.ly/plotly-3.0.0.min.js"></script>
+<style>
+:root {
+  --surface-page: #f9f9f7;
+  --card-bg: #ffffff;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --border: rgba(11,11,11,0.10);
+  --gridline: #e1e0d9;
+}
+
+[data-theme="dark"] {
+  --surface-page: #0d0d0d;
+  --card-bg: #1e1e1d;
+  --ink-primary: #f0efec;
+  --ink-secondary: #c3c2b7;
+  --ink-muted: #898781;
+  --border: rgba(255,255,255,0.10);
+  --gridline: #2c2c2a;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:var(--surface-page);
+  color:var(--ink-primary);
+  padding:32px 40px;line-height:1.5;
+}
+.page{max-width:1200px;margin:0 auto}
+
+.header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px}
+.header h1{font-size:22px;font-weight:600}
+.header .date{font-size:13px;color:var(--ink-muted)}
+
+.stat-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:14px;margin-bottom:24px}
+.stat-tile{background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:20px 24px}
+.stat-tile.hero .label{font-size:12px;font-weight:500;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.stat-tile.hero .value{font-size:40px;font-weight:600}
+.stat-tile .label{font-size:12px;font-weight:500;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.stat-tile .value{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat-tile .sub{font-size:12px;color:var(--ink-secondary);margin-top:2px}
+
+.chart-card{background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:24px}
+.chart-card h2{font-size:15px;font-weight:600;margin-bottom:2px}
+.chart-card .subtitle{font-size:12px;color:var(--ink-muted);margin-bottom:12px}
+
+.anomaly-card{background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:24px}
+.anomaly-card h2{font-size:15px;font-weight:600;margin-bottom:12px}
+
+.anomaly-table{width:100%;border-collapse:collapse;font-size:13px}
+.anomaly-table th{text-align:left;padding:8px 12px;color:var(--ink-muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid var(--gridline)}
+.anomaly-table td{padding:8px 12px;border-bottom:1px solid var(--gridline);cursor:pointer;transition:background .15s}
+.anomaly-table tr:hover td{background:rgba(57,135,229,.08)}
+.anomaly-table tr.selected td{background:rgba(57,135,229,.14)}
+
+.c1{color:#e66767;font-weight:600}
+.c2{color:#3987e5;font-weight:600}
+
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge-new{background:rgba(236,131,90,.15);color:#ec835a}
+.badge-reverse{background:rgba(250,178,25,.15);color:#fab219}
+.badge-continue{background:rgba(57,135,229,.12);color:#3987e5}
+
+.detail-card{background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:20px 24px;margin-top:16px;display:none}
+.detail-card.active{display:block}
+.detail-card h3{font-size:14px;font-weight:600;margin-bottom:6px}
+.detail-card .formula{font-family:'Consolas','Courier New',monospace;font-size:13px;background:var(--surface-page);padding:12px 16px;border-radius:6px;margin:8px 0;color:var(--ink-primary);line-height:1.8;white-space:pre-wrap}
+.detail-card .guide{font-size:13px;color:var(--ink-secondary)}
+
+@media(max-width:900px){.stat-row{grid-template-columns:1fr 1fr}.stat-tile.hero{grid-column:span 2}body{padding:16px}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="header">
+  <h1>交易对账看板</h1>
+  <span class="date">截至 2026-10-30</span>
+</div>
+
+<div class="stat-row">
+  <div class="stat-tile hero">
+    <div class="label">账户累计 TWR</div>
+    <div class="value">+4.91% / +8.85% / +3.95%</div>
+    <div class="sub">acc_001 · acc_002 · acc_003</div>
+  </div>
+  <div class="stat-tile">
+    <div class="label">总市值</div>
+    <div class="value">5.48M</div>
+    <div class="sub">2026-10-30</div>
+  </div>
+  <div class="stat-tile">
+    <div class="label">当日盈亏</div>
+    <div class="value" style="color:#0ca30c">+2.48万</div>
+    <div class="sub">2026-10-30 三个账户合计</div>
+  </div>
+  <div class="stat-tile">
+    <div class="label">持仓标的数</div>
+    <div class="value">15</div>
+    <div class="sub">持有 × 账户数</div>
+  </div>
+</div>
+
+<div class="chart-card">
+  <h2>累计收益率 (TWR)</h2>
+  <div class="subtitle">时间加权收益率 · 链式累计</div>
+  <div id="chart-twr" style="height:360px"></div>
+</div>
+
+<div class="anomaly-card">
+  <h2>对账差异清单 · 6 条</h2>
+  <table class="anomaly-table" id="anomaly-table">
+    <thead>
+      <tr>
+        <th>交易日</th><th>账户</th><th>标的</th><th>差异(股)</th>
+        <th>类型</th><th>模式</th><th>上日→本日</th><th>净成交</th><th>非交易</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="detail-card" id="detail-card">
+  <h3 id="detail-title"></h3>
+  <div class="formula" id="detail-formula"></div>
+</div>
+
+</div>
+
+<script>
+var DATA = {"twr_series": {"acc_001": {"dates": ["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"], "values": [NaN, 0.69, -1.46, -2.45, -0.93, -1.07, -1.15, -2.72, -1.94, -2.6, -2.49, -1.8, -2.53, -0.59, 0.1, 1.23, 1.23, 1.17, 1.51, 1.52, 0.72, 2.3, 1.94, 1.39, 1.75, 1.12, 0.18, -0.0, 0.2, -0.94, -1.04, -29.97, -1.61, 0.3, -0.84, 0.55, 1.06, 1.9, 1.42, 1.88, 2.61, 1.79, 2.8, 3.66, 6.63, 6.74, 6.68, 7.04, 6.49, 6.08, 6.07, 5.72, 3.48, 2.37, 3.28, 3.18, 4.39, 3.77, 3.49, 3.82, 3.92, 3.97, 4.98, 5.0, 4.91]}, "acc_002": {"dates": ["2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"], "values": [NaN, -0.6, -1.27, 0.54, 0.82, 0.12, -1.94, -1.06, -1.62, -1.3, -0.21, -0.95, 1.07, 1.62, 2.66, 2.47, 1.84, 1.86, 0.13, -1.72, -1.14, -2.9, -2.51, -1.5, 1.05, -1.03, 1.01, 1.36, 2.05, 2.39, 1.77, 0.62, 1.38, 0.2, 1.47, 1.89, 2.59, 2.16, 2.45, 3.28, 2.83, 4.0, 4.39, 5.9, 5.19, 5.42, 4.22, 4.66, 4.91, 6.85, 7.46, 5.14, 4.68, 4.46, 4.49, 1.76, 5.1, 4.95, 6.26, 6.36, 7.16, 7.86, 8.21, 8.85]}, "acc_003": {"dates": ["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"], "values": [NaN, 0.77, -0.14, -1.16, -0.26, -0.56, -0.51, -1.84, -2.24, -2.6, -1.96, -1.37, -2.04, -1.77, -2.48, -3.4, -3.76, -3.36, -3.34, -3.17, -3.9, -1.47, -0.72, -0.29, -1.74, -2.9, -2.85, -3.57, -2.25, -3.11, -2.58, -0.82, 0.05, 0.99, 0.05, 0.51, 0.05, 0.52, 0.96, 0.73, 1.49, 2.91, 4.62, 3.52, 0.77, 0.57, 0.89, -1.12, -0.92, -0.7, 0.82, 2.45, 1.47, 2.91, 3.76, 4.28, 4.74, 2.86, 2.59, 2.53, 1.69, 2.36, 3.98, 3.36, 3.95]}}, "breaks": [{"trade_date": "2026-10-29", "account_id": "acc_003", "symbol": "中国平安", "code": "601318", "diff": -500, "diff_type": "漏记", "diff_pattern": "反转", "pre_qty": 2850, "qty": 2350, "net_trade": 0.0, "non_trade_qty": 0.0, "summary": "漏记 500股 | 反转", "detail": "理论持仓 = 2850 + (0.0) + (0.0) ... 系统记录 = 2350\n差异 = -500股 → 漏记\n说明：昨日差异方向相反——通常是被冲正或「次日自愈」类差异。"}, {"trade_date": "2026-10-28", "account_id": "acc_003", "symbol": "中国平安", "code": "601318", "diff": 500, "diff_type": "多记", "diff_pattern": "新发", "pre_qty": 2350, "qty": 2850, "net_trade": 0.0, "non_trade_qty": 0.0, "summary": "多记 500股 | 新发", "detail": "理论持仓 = 2350 + (0.0) + (0.0) ... 系统记录 = 2850\n差异 = 500股 → 多记\n说明：首次出现差异——优先排查当天发生的原始错账。"}, {"trade_date": "2026-10-21", "account_id": "acc_002", "symbol": "五粮液", "code": "000858", "diff": 200, "diff_type": "多记", "diff_pattern": "反转", "pre_qty": 1600, "qty": 1800, "net_trade": 0.0, "non_trade_qty": 0.0, "summary": "多记 200股 | 反转", "detail": "理论持仓 = 1600 + (0.0) + (0.0) ... 系统记录 = 1800\n差异 = 200股 → 多记\n说明：昨日差异方向相反——通常是被冲正或「次日自愈」类差异。"}, {"trade_date": "2026-10-20", "account_id": "acc_002", "symbol": "五粮液", "code": "000858", "diff": -200, "diff_type": "漏记", "diff_pattern": "新发", "pre_qty": 1800, "qty": 1600, "net_trade": 0.0, "non_trade_qty": 0.0, "summary": "漏记 200股 | 新发", "detail": "理论持仓 = 1800 + (0.0) + (0.0) ... 系统记录 = 1600\n差异 = -200股 → 漏记\n说明：首次出现差异——优先排查当天发生的原始错账。"}, {"trade_date": "2026-09-16", "account_id": "acc_001", "symbol": "贵州茅台", "code": "600519", "diff": 100, "diff_type": "多记", "diff_pattern": "反转", "pre_qty": -60, "qty": 0, "net_trade": -40.0, "non_trade_qty": 0.0, "summary": "多记 100股 | 反转", "detail": "理论持仓 = -60 + (-40.0) + (0.0) ... 系统记录 = 0\n差异 = 100股 → 多记\n说明：昨日差异方向相反——通常是被冲正或「次日自愈」类差异。"}, {"trade_date": "2026-09-15", "account_id": "acc_001", "symbol": "贵州茅台", "code": "600519", "diff": -100, "diff_type": "漏记", "diff_pattern": "新发", "pre_qty": 40, "qty": -60, "net_trade": 0.0, "non_trade_qty": 0.0, "summary": "漏记 100股 | 新发", "detail": "理论持仓 = 40 + (0.0) + (0.0) ... 系统记录 = -60\n差异 = -100股 → 漏记\n说明：首次出现差异——优先排查当天发生的原始错账。"}]};
+
+var fmtNum = new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:0,maximumFractionDigits:0}).format;
+
+// 折线图
+var traces = [];
+var cols = ["#3987e5","#d95926","#199e70"];
+var ci = 0;
+for(var k in DATA.twr_series){
+  var s = DATA.twr_series[k];
+  traces.push({
+    x:s.dates, y:s.values,
+    name:k,
+    type:"scatter", mode:"lines+markers",
+    line:{width:2, color:cols[ci]},
+    marker:{size:5, color:cols[ci], line:{width:2, color:"#1e1e1d"}},
+    hovertemplate:"%{x}<br>"+k+": %{y:.2f}%<extra></extra>",
+  });
+  ci++;
+}
+
+Plotly.newPlot("chart-twr", traces, {
+  margin:{l:52, r:20, t:12, b:40},
+  paper_bgcolor:"transparent",
+  plot_bgcolor:"transparent",
+  xaxis:{
+    gridcolor:"rgba(255,255,255,.06)",
+    zeroline:false,
+    tickfont:{size:11, color:"#898781"},
+    showline:true, linewidth:1, linecolor:"#2c2c2a",
+  },
+  yaxis:{
+    gridcolor:"rgba(255,255,255,.06)",
+    zeroline:true, zerolinecolor:"#383835", zerolinewidth:1,
+    tickfont:{size:11, color:"#898781"},
+    ticksuffix:"%",
+    showline:true, linewidth:1, linecolor:"#2c2c2a",
+  },
+  legend:{orientation:"h", y:1.1, font:{size:12, color:"#c3c2b7"}},
+  hovermode:"x unified",
+}, {responsive:true, displayModeBar:false});
+
+// 异常表
+var tbody = document.querySelector("#anomaly-table tbody");
+DATA.breaks.forEach(function(row, i){
+  var tr = document.createElement("tr");
+  tr.dataset.idx = i;
+  tr.dataset.title = row.trade_date + " " + row.account_id + " " + row.symbol;
+  tr.dataset.detail = row.detail;
+  var dc = row.diff > 0 ? "c1" : "c2";
+  var bc = row.diff_pattern === "新发" ? "badge badge-new"
+        : row.diff_pattern === "反转" ? "badge badge-reverse"
+        : "badge badge-continue";
+  tr.innerHTML =
+    "<td>" + row.trade_date + "</td>"
+    + "<td>" + row.account_id + "</td>"
+    + "<td>" + row.symbol + "</td>"
+    + "<td class=\"" + dc + "\">" + (row.diff>0?"+":"") + row.diff + "</td>"
+    + "<td>" + row.diff_type + "</td>"
+    + "<td><span class=\"" + bc + "\">" + row.diff_pattern + "</span></td>"
+    + "<td>" + row.pre_qty + " → " + row.qty + "</td>"
+    + "<td>" + row.net_trade + "</td>"
+    + "<td>" + row.non_trade_qty + "</td>";
+
+  tr.addEventListener("click", function(){
+    document.querySelectorAll("#anomaly-table tr").forEach(function(r){r.classList.remove("selected")});
+    this.classList.add("selected");
+    var card = document.getElementById("detail-card");
+    card.classList.add("active");
+    document.getElementById("detail-title").textContent = this.dataset.title;
+    document.getElementById("detail-formula").textContent = this.dataset.detail;
+    card.scrollIntoView({behavior:"smooth", block:"nearest"});
+  });
+  tbody.appendChild(tr);
+});
+// 默认选中最后一条（最新的）
+var rows = tbody.querySelectorAll("tr");
+if(rows.length) rows[0].click();
+</script>
+</body>
+</html>
